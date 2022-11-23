@@ -1,0 +1,134 @@
+-- Assignment 1
+
+-- Q1: Identify the items with the highest and lowest (non-zero) unit price?
+(SELECT article, unit_price AS MIN_MAX_UNIT_PRICE
+FROM fact_tables.bakery_sales
+WHERE unit_price != 0
+ORDER BY unit_price
+LIMIT 1)
+UNION
+(SELECT article, unit_price AS MIN_MAX_UNIT_PRICE
+FROM fact_tables.bakery_sales
+WHERE unit_price != 0
+ORDER BY unit_price desc
+LIMIT 1);
+
+-- Q2: Write a SQL query to report the second most sold item from the bakery table.
+-- If there is no second most sold item, the query should report NULL.
+SELECT
+    article,
+    CASE WHEN NOT COUNT(article) > 1
+        THEN NULL
+        ELSE SUM(quantity)
+    END
+FROM fact_tables.bakery_sales
+GROUP BY article
+ORDER BY SUM(quantity) DESC
+LIMIT 1 OFFSET 1;
+-- Q3: Write a SQL query to report the top 3 most sold items for every month in 2022
+-- including their monthly volumes and sales.
+-- This is finding 3 highest quantity sold in each month. Not the sales
+SELECT selling_rank, month, article, volume, article_sales FROM (
+    SELECT EXTRACT(MONTH FROM sale_date) AS month_number,
+           TO_CHAR(sale_date, 'Month') AS month,
+           article, SUM(quantity) AS volume,
+           SUM(quantity * unit_price) AS article_sales,
+           ROW_NUMBER() OVER (PARTITION BY TO_CHAR(sale_date, 'Month')
+               ORDER BY SUM(quantity) DESC) AS selling_rank
+    FROM fact_tables.bakery_sales
+    WHERE EXTRACT (YEAR FROM sale_date) = 2022
+    GROUP BY EXTRACT(MONTH FROM sale_date), TO_CHAR(sale_date, 'Month'), article) ranks
+WHERE selling_rank <= 3
+ORDER BY month_number, selling_rank;
+
+-- Q4: Write a SQL query to report all the tickets with 5 or more articles in August 2022
+-- including the number of articles in each ticket. --> articles or types
+SELECT sale_date, ticket_number, SUM(quantity) AS articles_ordered
+FROM fact_tables.bakery_sales
+WHERE sale_date BETWEEN '2022-08-01' AND '2022-08-31'
+GROUP BY sale_date, ticket_number
+HAVING SUM(quantity) > 4
+ORDER BY sale_date ASC;
+
+-- Q5: Write a SQL query to calculate the average sales per day in August 2022?
+WITH TOTAL_DAILY_AUGUST_SALES AS (
+    SELECT SUM(quantity * unit_price) AS sales_per_day
+    FROM fact_tables.bakery_sales
+    WHERE sale_date BETWEEN '2022-08-01' AND '2022-08-31'
+    GROUP BY sale_date)
+SELECT AVG(sales_per_day) as avg_daily_aug_sales
+FROM TOTAL_DAILY_AUGUST_SALES;
+
+-- Q6: Write a SQL query to identify the day of the week with more sales?
+SELECT TO_CHAR(sale_date, 'Day') AS day, SUM(quantity * unit_price)
+FROM fact_tables.bakery_sales
+GROUP BY day
+ORDER BY SUM(quantity * unit_price) DESC
+LIMIT 1;
+
+-- Q7: What time of the day is the traditional Baguette more popular?
+-- Ask time of day means hour?
+SELECT article, SUM(quantity) AS quantity, EXTRACT(HOUR FROM sale_datetime) AS hour
+FROM fact_tables.bakery_sales
+WHERE article = 'TRADITIONAL BAGUETTE'
+GROUP BY article, EXTRACT(HOUR FROM sale_datetime)
+ORDER BY quantity DESC
+LIMIT 1;
+
+-- Q8: Write a SQL query to find the articles with the lowest sales in each month?
+WITH MONTHLY_SALES AS (
+
+    SELECT TO_CHAR(sale_datetime, 'YYYY-MM') AS date,
+           article, TO_CHAR(sale_datetime, 'Month') AS month,
+           EXTRACT(YEAR FROM sale_datetime) AS year,
+           SUM(quantity * unit_price) AS sales,
+           RANK() OVER (PARTITION BY TO_CHAR(sale_datetime, 'YYYY-MM')
+                ORDER BY SUM(quantity * unit_price) ASC) AS sales_rank
+    FROM fact_tables.bakery_sales
+    WHERE quantity >= 0 --AND article NOT LIKE '.'
+    GROUP BY date, article, month, year
+    ORDER BY date, sales ASC)
+SELECT article, sales, month, year
+FROM MONTHLY_SALES
+WHERE sales_rank <= 1
+ORDER BY year;
+
+-- Q9: Write a query to calculate the percentage of sales for each item between 2022-01-01 and 2022-01-31
+-- DROP TABLE IF EXISTS TOTAL_SALES_YEAR;
+WITH TOTAL_SALES_YEAR AS (
+    SELECT SUM(quantity * unit_price) AS year_total_sales
+    FROM fact_tables.bakery_sales
+    WHERE sale_date BETWEEN '2022-01-01' AND '2022-01-31')
+SELECT article, SUM(quantity * unit_price) / year_total_sales AS percentage_sales
+FROM fact_tables.bakery_sales, TOTAL_SALES_YEAR
+WHERE sale_date BETWEEN '2022-01-01' AND '2022-01-31'
+GROUP BY article, year_total_sales
+ORDER BY article;
+
+-- Q10: The order rate is computed by dividing the volume of a specific article
+-- divided by the total amount of items ordered in a specific date. Calculate the
+-- order rate for the Banette for every month during 2022.
+WITH TOTAL_ORDERS_MONTH_YEAR AS (
+    SELECT SUM(quantity) AS total_monthly_orders,
+           TO_CHAR(sale_date, 'Month') AS month,
+           EXTRACT(YEAR FROM sale_date) AS year
+    FROM fact_tables.bakery_sales
+    GROUP BY TO_CHAR(sale_date, 'Month'), EXTRACT(YEAR FROM sale_date)),
+MONTHLY_BANETTE_ORDERS AS (
+    SELECT article,
+           SUM(quantity) AS banette_orders,
+           EXTRACT(MONTH from sale_date) AS month_number,
+           TO_CHAR(sale_date, 'Month') AS month,
+           EXTRACT(YEAR FROM sale_date) AS year
+    FROM fact_tables.bakery_sales
+    WHERE sale_date BETWEEN '2022-01-01' AND '2022-12-31' AND article = 'BANETTE'
+    GROUP BY article, TO_CHAR(sale_date, 'Month'), EXTRACT(MONTH from sale_date), EXTRACT(YEAR FROM sale_date))
+SELECT
+    MONTHLY_BANETTE_ORDERS.month,
+    banette_orders * 1.00 / total_monthly_orders * 1.00 AS banette_order_rate
+FROM TOTAL_ORDERS_MONTH_YEAR
+    INNER JOIN MONTHLY_BANETTE_ORDERS
+        ON (MONTHLY_BANETTE_ORDERS.month = TOTAL_ORDERS_MONTH_YEAR.month AND
+            MONTHLY_BANETTE_ORDERS.year = TOTAL_ORDERS_MONTH_YEAR.year)
+GROUP BY month_number, MONTHLY_BANETTE_ORDERS.month, banette_orders, total_monthly_orders
+ORDER BY month_number;
